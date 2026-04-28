@@ -1,0 +1,5 @@
+# log-analyzer uses Python stdlib only — no external dependencies required.
+# Python 3.9+ recommended.
+
+# Optional: install for .env support (not required)
+# python-dotenv>=1.0.0

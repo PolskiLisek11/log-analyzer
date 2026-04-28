@@ -1,0 +1,27 @@
+Apr 28 08:01:15 srv sshd[5001]: Accepted publickey for alice from 192.168.1.10 port 60100 ssh2
+Apr 28 08:45:30 srv sshd[5002]: Accepted password for bob from 192.168.1.20 port 60200 ssh2
+Apr 28 09:10:00 srv sshd[5003]: Failed password for charlie from 192.168.1.30 port 60300 ssh2
+Apr 28 09:10:05 srv sshd[5004]: Failed password for charlie from 192.168.1.30 port 60301 ssh2
+Apr 28 09:10:10 srv sshd[5005]: Accepted password for charlie from 192.168.1.30 port 60302 ssh2
+Apr 28 10:00:00 srv sshd[5006]: Accepted publickey for devops from 192.168.1.50 port 60400 ssh2
+Apr 28 12:30:00 srv sshd[5007]: Accepted password for alice from 192.168.1.10 port 60500 ssh2
+Apr 28 14:15:45 srv sshd[5008]: Accepted password for bob from 192.168.1.20 port 60600 ssh2
+Apr 28 16:00:00 srv sshd[5009]: Accepted publickey for devops from 192.168.1.50 port 60700 ssh2
+Apr 28 17:30:00 srv sshd[5010]: Accepted password for alice from 192.168.1.10 port 60800 ssh2
+10.0.0.1 - - [28/Apr/2026:08:00:01 +0000] "GET / HTTP/1.1" 200 1234 "-" "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
+10.0.0.1 - - [28/Apr/2026:08:05:10 +0000] "GET /about HTTP/1.1" 200 876 "-" "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
+10.0.0.1 - - [28/Apr/2026:08:10:30 +0000] "GET /products HTTP/1.1" 200 2345 "-" "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
+10.0.0.1 - - [28/Apr/2026:08:15:00 +0000] "GET /contact HTTP/1.1" 200 567 "-" "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
+10.0.0.2 - - [28/Apr/2026:09:00:00 +0000] "GET / HTTP/1.1" 200 1234 "-" "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"
+10.0.0.2 - - [28/Apr/2026:09:10:00 +0000] "POST /api/login HTTP/1.1" 200 456 "-" "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"
+10.0.0.2 - - [28/Apr/2026:09:15:00 +0000] "GET /dashboard HTTP/1.1" 200 4567 "-" "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"
+10.0.0.2 - - [28/Apr/2026:09:30:00 +0000] "GET /reports HTTP/1.1" 200 8901 "-" "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"
+10.0.0.3 - - [28/Apr/2026:10:00:00 +0000] "GET / HTTP/1.1" 200 1234 "-" "Mozilla/5.0 (X11; Linux x86_64)"
+10.0.0.3 - - [28/Apr/2026:10:05:00 +0000] "GET /docs HTTP/1.1" 200 3456 "-" "Mozilla/5.0 (X11; Linux x86_64)"
+10.0.0.3 - - [28/Apr/2026:10:10:00 +0000] "GET /docs/api HTTP/1.1" 200 5678 "-" "Mozilla/5.0 (X11; Linux x86_64)"
+10.0.0.4 - - [28/Apr/2026:11:00:00 +0000] "GET / HTTP/1.1" 200 1234 "-" "Googlebot/2.1 (+http://www.google.com/bot.html)"
+10.0.0.4 - - [28/Apr/2026:11:05:00 +0000] "GET /sitemap.xml HTTP/1.1" 200 567 "-" "Googlebot/2.1 (+http://www.google.com/bot.html)"
+10.0.0.4 - - [28/Apr/2026:11:10:00 +0000] "GET /about HTTP/1.1" 200 876 "-" "Googlebot/2.1 (+http://www.google.com/bot.html)"
+10.0.0.5 - - [28/Apr/2026:13:00:00 +0000] "GET /missing-page HTTP/1.1" 404 512 "-" "Mozilla/5.0 (Windows NT 10.0)"
+10.0.0.5 - - [28/Apr/2026:13:01:00 +0000] "GET /old-link HTTP/1.1" 301 0 "-" "Mozilla/5.0 (Windows NT 10.0)"
+10.0.0.5 - - [28/Apr/2026:13:01:01 +0000] "GET /new-link HTTP/1.1" 200 1234 "-" "Mozilla/5.0 (Windows NT 10.0)"
