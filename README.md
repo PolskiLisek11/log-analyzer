@@ -137,16 +137,65 @@ python analyzer.py --batch examples/ --output report.json
 | `1` | Startup error (file not found, etc.) |
 | `2` | Threats found — useful for CI/SIEM pipelines |
 
+## Jarvis — the analyzer as an agent
+
+`analyzer.py` tells you *what* is in a log. Jarvis is a personal agent that can
+act on it: correlate an IP across files, remember what you decided about it last
+week, and draft the firewall rule. The analyzer becomes one of its tools.
+
+```bash
+pip install anthropic
+export ANTHROPIC_API_KEY=sk-ant-...
+
+python -m jarvis                                     # interactive session
+python -m jarvis -p "scan examples/ and summarise"   # one-shot
+python -m jarvis --workspace /var/log --approve readonly
+```
+
+It is assembled from five parts — a model, a loop, memory, tools and an
+interface — with a home at `~/.jarvis`:
+
+| Part | Where | What it does |
+|------|-------|--------------|
+| Engine | `jarvis/engine.py` | Talks to Claude. Streaming, adaptive thinking, effort. |
+| Harness | `jarvis/harness.py` | The loop: plan → act → feed results back → repeat. |
+| Memory | `jarvis/memory.py` | Markdown notes that survive between sessions. |
+| Tools | `jarvis/tools/` | Files, shell, memory, and `scan_logs` — this analyzer. |
+| Interface | `jarvis/cli.py`, `jarvis/voice.py` | Terminal REPL, optional speech. |
+
+State-changing actions ask before they run (`--approve auto` to skip, `readonly`
+to refuse). File tools cannot leave the workspace, and the shell tool runs one
+allowlisted command with no shell interpretation — so pipes and redirects do not
+work, and neither does command injection.
+
+Architecture and the reasoning behind each boundary: **[docs/JARVIS.md](docs/JARVIS.md)**.
+
+```bash
+python -m unittest discover -s tests -t .   # 97 tests, all offline
+```
+
+`analyzer.py` itself stays stdlib-only — `anthropic` is needed only for the agent.
+
 ## Project Structure
 
 ```
 log-analyzer/
 ├── analyzer.py          # main script — parser, detection engine, output
-├── requirements.txt     # stdlib only, no pip install needed
-└── examples/
-    ├── ssh_bruteforce.log       # simulated SSH brute force (3 IPs)
-    ├── web_scanning.log         # simulated dir scan + sqlmap + nikto
-    └── normal_traffic.log       # clean baseline traffic
+├── requirements.txt     # stdlib only for the analyzer; anthropic for the agent
+├── examples/
+│   ├── ssh_bruteforce.log       # simulated SSH brute force (3 IPs)
+│   ├── web_scanning.log         # simulated dir scan + sqlmap + nikto
+│   └── normal_traffic.log       # clean baseline traffic
+├── jarvis/              # the agent
+│   ├── engine.py                # the model
+│   ├── harness.py               # the agent loop
+│   ├── memory.py                # long-term notes
+│   ├── prompts.py               # system prompt
+│   ├── voice.py                 # speech output
+│   ├── cli.py                   # REPL + one-shot mode
+│   └── tools/                   # files, shell, memory, plan, scan_logs
+├── docs/JARVIS.md       # agent architecture
+└── tests/test_jarvis.py # offline test suite
 ```
 
 ## Detection Thresholds

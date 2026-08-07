@@ -1,0 +1,11 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Analyzer output
+report.json
+
+# The agent's home, if anyone points JARVIS_HOME at the repo
+.jarvis/
