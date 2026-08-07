@@ -168,6 +168,21 @@ to refuse). File tools cannot leave the workspace, and the shell tool runs one
 allowlisted command with no shell interpretation — so pipes and redirects do not
 work, and neither does command injection.
 
+### Works with other agents too
+
+The analyzer is also an MCP server, so it plugs into Claude Desktop, Claude Code,
+Hermes Agent — anything that speaks the protocol:
+
+```bash
+pip install mcp
+python -m jarvis.mcp_server --workspace /var/log
+```
+
+Read-only by default; `--allow-writes` opts in to the rest. And in the other
+direction, remote MCP servers (Gmail, Calendar, …) become Jarvis's tools with no
+integration code — the API connects to them server-side. See
+`jarvis.config.example.json`.
+
 Architecture and the reasoning behind each boundary: **[docs/JARVIS.md](docs/JARVIS.md)**.
 
 ```bash
@@ -187,12 +202,13 @@ log-analyzer/
 │   ├── web_scanning.log         # simulated dir scan + sqlmap + nikto
 │   └── normal_traffic.log       # clean baseline traffic
 ├── jarvis/              # the agent
-│   ├── engine.py                # the model
+│   ├── engine.py                # the model (+ remote MCP servers as tools)
 │   ├── harness.py               # the agent loop
 │   ├── memory.py                # long-term notes
 │   ├── prompts.py               # system prompt
 │   ├── voice.py                 # speech output
 │   ├── cli.py                   # REPL + one-shot mode
+│   ├── mcp_server.py            # the analyzer, exposed to any MCP client
 │   └── tools/                   # files, shell, memory, plan, scan_logs
 ├── docs/JARVIS.md       # agent architecture
 └── tests/test_jarvis.py # offline test suite

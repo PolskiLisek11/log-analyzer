@@ -103,6 +103,9 @@ class Toolbox:
     def __contains__(self, name: str) -> bool:
         return name in self._tools
 
+    def get(self, name: str) -> ToolSpec | None:
+        return self._tools.get(name)
+
     def __len__(self) -> int:
         return len(self._tools)
 

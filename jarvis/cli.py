@@ -253,6 +253,10 @@ def handle_command(command: str, agent: Harness, renderer: Renderer) -> bool:
     elif cmd == "/tools":
         for name in agent.toolbox.names():
             print(f"  {name}")
+        for server in agent.config.mcp_servers:
+            # Named, not listed: their tools are resolved by the API at request
+            # time, so this process never sees the individual names.
+            print(f"  {C.DIM}+ tools from MCP server {server['name']}{C.RESET}")
     elif cmd == "/workspace":
         print(f"  {agent.config.workspace}")
     elif cmd == "/save":
@@ -272,6 +276,9 @@ def repl(agent: Harness, renderer: Renderer, voice) -> int:
     print(f"{C.DIM}model {agent.config.model} · effort {agent.config.effort} · "
           f"approve {agent.config.approval_mode} · {len(agent.toolbox)} tools{C.RESET}")
     print(f"{C.DIM}workspace {agent.config.workspace}{C.RESET}")
+    if agent.config.mcp_servers:
+        names = ", ".join(s["name"] for s in agent.config.mcp_servers)
+        print(f"{C.DIM}mcp {names}{C.RESET}")
     print(f"{C.DIM}/help for commands, /exit to quit{C.RESET}")
 
     while True:

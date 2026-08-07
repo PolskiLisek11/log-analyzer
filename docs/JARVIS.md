@@ -233,6 +233,81 @@ accuracy.
 
 ---
 
+## MCP — the plug that works both ways
+
+The tool registry is the right place for tools that are *ours*: the log
+analyzer is this repository's own code, and wrapping it in a protocol to call it
+from the same process would be silly. It is the wrong place for Gmail, Calendar
+or Slack — writing an API client for each of those is work someone has already
+done, and done better.
+
+So the agent speaks MCP in both directions.
+
+### Outward: the analyzer as an MCP server
+
+```bash
+python -m jarvis.mcp_server --workspace /var/log
+```
+
+`jarvis/mcp_server.py` serves the same tools over stdio, reading from the same
+registry — so a tool's name, description and schema are identical whether it is
+reached through the agent or through the protocol, and there is no second copy
+to drift. A test asserts that equality rather than trusting it.
+
+Claude Desktop (`claude_desktop_config.json`), and the same shape works for
+Claude Code or Hermes Agent:
+
+```json
+{
+  "mcpServers": {
+    "log-analyzer": {
+      "command": "python",
+      "args": ["-m", "jarvis.mcp_server", "--workspace", "/var/log"],
+      "cwd": "/path/to/log-analyzer"
+    }
+  }
+}
+```
+
+**Read-only by default.** An MCP server hands its tools to whatever connects,
+and there is no human in that process to approve anything — the connecting
+client owns that conversation. The default set is the two `scan_logs` tools plus
+read-only file access. `--allow-writes` adds editing and shell, and makes the
+client solely responsible for gating them.
+
+This is also what makes the choice of agent reversible. Try Hermes Agent this
+month and something else next month; the domain tools plug into both.
+
+### Inward: remote MCP servers as tools
+
+```json
+{
+  "mcp_servers": [
+    {"name": "gmail", "url": "https://…/sse", "authorization_token": "${GMAIL_MCP_TOKEN}"}
+  ]
+}
+```
+
+That is the entire integration. The Messages API connects to the server
+itself — nothing in this process executes those tools, and their results arrive
+as `mcp_tool_result` blocks rather than as `tool_use` requests for the harness
+to run, so the loop needs no special case. `${VAR}` references are resolved from
+the environment, and an undefined one fails at startup rather than as a 401 three
+steps into a task.
+
+Two things follow from the API owning the connection: it works only for
+**remote** servers reachable by URL (a local stdio server would need a real MCP
+client in this process), and every server must be referenced by exactly one
+`mcp_toolset` entry or the request is rejected — which is why the degradation
+path strips both together.
+
+**An MCP server is third-party code with access to whatever you give it.** The
+directories worth browsing are [best-of-mcp-servers](https://github.com/tolkonepiu/best-of-mcp-servers)
+and [awesome-mcp-servers](https://github.com/appcypher/awesome-mcp-servers); the
+judgement about which to trust is yours and does not transfer.
+
+---
+
 ## Prompt caching
 
 The system prompt is built once in `Harness.__init__` and never mutated. It

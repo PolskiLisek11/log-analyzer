@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 
@@ -37,8 +38,35 @@ DEFAULT_SHELL_ALLOW: tuple[str, ...] = (
 APPROVAL_MODES = ("ask", "auto", "readonly")
 
 
+_ENV_REF = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
+
+
 def _default_home() -> Path:
     return Path(os.environ.get("JARVIS_HOME") or (Path.home() / ".jarvis"))
+
+
+def _expand_env(value, field: str):
+    """Substitute ${VAR} references in a config string.
+
+    Config files get committed by accident and copied into backups, so an API
+    token belongs in the environment and only its name belongs here. An
+    undefined variable is an error rather than a silent pass-through: sending
+    the literal "${GMAIL_TOKEN}" as a bearer token fails far from its cause.
+    """
+    if not isinstance(value, str):
+        return value
+
+    def replace(match: "re.Match[str]") -> str:
+        name = match.group(1)
+        resolved = os.environ.get(name)
+        if resolved is None:
+            raise ValueError(
+                f"config field {field!r} references ${{{name}}}, which is not set "
+                "in the environment"
+            )
+        return resolved
+
+    return _ENV_REF.sub(replace, value)
 
 
 @dataclass
@@ -67,6 +95,12 @@ class Config:
 
     # ── Tools ─────────────────────────────────────────────────────────────────
     approval_mode: str = "ask"       # ask | auto | readonly
+
+    # Remote MCP servers, connected by the API rather than by this process:
+    # [{"name": "gmail", "url": "https://…/sse", "authorization_token": "…"}].
+    # Each one contributes its tools without a line of integration code here.
+    mcp_servers: tuple[dict, ...] = ()
+
     shell_allow_extra: tuple[str, ...] = ()
     shell_timeout: int = 30
     max_output_chars: int = 30_000   # per tool result, before truncation
@@ -83,6 +117,21 @@ class Config:
             raise ValueError(
                 f"approval_mode must be one of {APPROVAL_MODES}, got {self.approval_mode!r}"
             )
+
+        # Validated here rather than at request time: a typo in config.json
+        # should fail on startup with the offending entry, not as an opaque 400
+        # in the middle of a task.
+        servers = []
+        for entry in self.mcp_servers or ():
+            if not isinstance(entry, dict) or not entry.get("name") or not entry.get("url"):
+                raise ValueError(
+                    f"each mcp_servers entry needs 'name' and 'url', got {entry!r}"
+                )
+            servers.append({k: _expand_env(v, k) for k, v in entry.items()})
+        names = [s["name"] for s in servers]
+        if len(names) != len(set(names)):
+            raise ValueError(f"mcp_servers names must be unique, got {names}")
+        self.mcp_servers = tuple(servers)
 
     # ── Derived paths ─────────────────────────────────────────────────────────
 

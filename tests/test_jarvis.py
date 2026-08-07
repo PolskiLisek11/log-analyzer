@@ -9,7 +9,9 @@ allowlist, the approval gate, and the response shaping the loop depends on.
 
 from __future__ import annotations
 
+import os
 import shutil
+import sys
 import tempfile
 import types
 import unittest
@@ -578,7 +580,12 @@ class TestEngineDegradation(unittest.TestCase):
         self.assertEqual(name, "betas")
 
     def test_degradations_cover_every_optional_kwarg(self):
-        optional = {"thinking", "output_config", "betas", "fallbacks", "context_management"}
+        # Every optional request parameter must have a way to be given up, or a
+        # model that rejects it takes the whole session down with it.
+        optional = {
+            "thinking", "output_config", "betas", "fallbacks",
+            "context_management", "mcp_servers",
+        }
         covered = {key for _, _, keys, _ in Engine._DEGRADATIONS for key in keys}
         self.assertEqual(covered, optional)
 
@@ -898,6 +905,173 @@ class TestHarnessLoop(AgentTestCase):
         self.assertEqual(follow_up["role"], "user")
         self.assertIn("automatic review", follow_up["content"])
         self.assertIn("the second file was never written", follow_up["content"])
+
+
+# ── MCP: consuming remote servers ─────────────────────────────────────────────
+
+class TestMcpClient(AgentTestCase):
+    """Jarvis as an MCP client — remote servers' tools, no integration code."""
+
+    def engine(self, **overrides):
+        config = Config(home=self.tmp / "h", workspace=self.tmp / "w", **overrides)
+        return Engine(config)
+
+    def test_no_servers_configured_means_no_mcp_in_the_request(self):
+        kwargs = self.engine()._kwargs("sys", [], [{"name": "read_file"}])
+        self.assertNotIn("mcp_servers", kwargs)
+        self.assertNotIn("mcp-client-2025-11-20", kwargs.get("betas", []))
+
+    def test_configured_servers_produce_servers_toolsets_and_the_beta(self):
+        engine = self.engine(mcp_servers=({"name": "gmail", "url": "https://x/sse"},))
+        kwargs = engine._kwargs("sys", [], [{"name": "read_file"}])
+
+        self.assertEqual(kwargs["mcp_servers"], [{"name": "gmail", "url": "https://x/sse"}])
+        self.assertIn("mcp-client-2025-11-20", kwargs["betas"])
+        # Every server must be referenced by exactly one toolset or the API
+        # rejects the request outright.
+        toolsets = [t for t in kwargs["tools"] if t.get("type") == "mcp_toolset"]
+        self.assertEqual(toolsets, [{"type": "mcp_toolset", "mcp_server_name": "gmail"}])
+
+    def test_local_tools_survive_alongside_mcp_toolsets(self):
+        engine = self.engine(mcp_servers=({"name": "gmail", "url": "https://x/sse"},))
+        kwargs = engine._kwargs("sys", [], [{"name": "scan_logs"}])
+        self.assertIn({"name": "scan_logs"}, kwargs["tools"])
+
+    def test_toolsets_are_emitted_in_a_stable_order(self):
+        engine = self.engine(mcp_servers=(
+            {"name": "zulip", "url": "https://z/sse"},
+            {"name": "gmail", "url": "https://g/sse"},
+        ))
+        kwargs = engine._kwargs("sys", [], [])
+        names = [t["mcp_server_name"] for t in kwargs["tools"] if t.get("type") == "mcp_toolset"]
+        self.assertEqual(names, sorted(names))
+
+    def test_an_mcp_rejection_drops_servers_and_toolsets_together(self):
+        engine = self.engine(mcp_servers=({"name": "gmail", "url": "https://x/sse"},))
+        kwargs = engine._kwargs("sys", [], [{"name": "read_file"}])
+
+        chosen = Engine._next_degradation(
+            types.SimpleNamespace(message="mcp_servers: beta not enabled"), kwargs, set()
+        )
+        self.assertIsNotNone(chosen)
+        self.assertEqual(chosen[0], "mcp_servers")
+
+    def test_config_rejects_a_server_without_a_url(self):
+        with self.assertRaises(ValueError):
+            Config(home=self.tmp, mcp_servers=({"name": "gmail"},))
+
+    def test_config_rejects_duplicate_server_names(self):
+        with self.assertRaises(ValueError):
+            Config(home=self.tmp, mcp_servers=(
+                {"name": "gmail", "url": "https://a"}, {"name": "gmail", "url": "https://b"},
+            ))
+
+    def test_tokens_are_read_from_the_environment(self):
+        os.environ["JARVIS_TEST_TOKEN"] = "s3cret"
+        self.addCleanup(os.environ.pop, "JARVIS_TEST_TOKEN", None)
+
+        config = Config(home=self.tmp, mcp_servers=({
+            "name": "gmail", "url": "https://x", "authorization_token": "${JARVIS_TEST_TOKEN}",
+        },))
+        self.assertEqual(config.mcp_servers[0]["authorization_token"], "s3cret")
+
+    def test_an_undefined_variable_fails_at_startup(self):
+        # Better here than as a 401 from a server three steps into a task.
+        with self.assertRaises(ValueError) as caught:
+            Config(home=self.tmp, mcp_servers=({
+                "name": "gmail", "url": "https://x", "authorization_token": "${NOT_SET_ANYWHERE}",
+            },))
+        self.assertIn("NOT_SET_ANYWHERE", str(caught.exception))
+
+
+# ── MCP: serving our own tools ────────────────────────────────────────────────
+
+class TestMcpServerToolset(unittest.TestCase):
+    """What the MCP server advertises. An MCP server hands its tools to
+    whatever connects, so the default set is the security-relevant decision."""
+
+    def test_writes_are_excluded_by_default(self):
+        from jarvis.mcp_server import build_toolbox
+
+        names = build_toolbox(allow_writes=False).names()
+        for mutating in ("write_file", "edit_file", "run_shell"):
+            self.assertNotIn(mutating, names)
+
+    def test_the_domain_tools_are_present(self):
+        from jarvis.mcp_server import build_toolbox
+
+        names = build_toolbox(allow_writes=False).names()
+        self.assertIn("scan_logs", names)
+        self.assertIn("scan_logs_json", names)
+
+    def test_allow_writes_adds_the_mutating_tools(self):
+        from jarvis.mcp_server import build_toolbox
+
+        names = build_toolbox(allow_writes=True).names()
+        self.assertIn("write_file", names)
+        self.assertIn("run_shell", names)
+
+    def test_declarations_match_the_agent_registry_exactly(self):
+        # One source of truth: the MCP surface and the in-process agent must not
+        # drift, or a tool means two different things depending on the door.
+        from jarvis.cli import build_toolbox as agent_toolbox
+        from jarvis.mcp_server import build_toolbox as mcp_toolbox
+
+        agent = {d["name"]: d for d in agent_toolbox(Config(), lambda *a: True).definitions()}
+        for definition in mcp_toolbox(allow_writes=False).definitions():
+            with self.subTest(tool=definition["name"]):
+                self.assertEqual(definition, agent[definition["name"]])
+
+
+class TestMcpServerEndToEnd(unittest.TestCase):
+    """Spawns the real server and speaks MCP to it over stdio."""
+
+    def run_session(self, coro_body):
+        try:
+            import anyio
+            from mcp import ClientSession, StdioServerParameters
+            from mcp.client.stdio import stdio_client
+        except ImportError:  # pragma: no cover
+            self.skipTest("mcp SDK not installed")
+
+        async def main():
+            params = StdioServerParameters(
+                command=sys.executable,
+                args=["-m", "jarvis.mcp_server", "--workspace", "."],
+                cwd=str(REPO_ROOT),
+            )
+            with anyio.fail_after(60):
+                async with stdio_client(params) as (read, write):
+                    async with ClientSession(read, write) as session:
+                        await session.initialize()
+                        return await coro_body(session)
+
+        return anyio.run(main)
+
+    def test_the_server_advertises_its_tools_over_the_protocol(self):
+        result = self.run_session(lambda s: s.list_tools())
+        names = sorted(t.name for t in result.tools)
+        self.assertIn("scan_logs", names)
+        self.assertNotIn("write_file", names)
+        for tool in result.tools:
+            self.assertTrue(tool.description)
+            self.assertEqual(tool.input_schema["type"], "object")
+
+    def test_a_scan_runs_through_the_protocol(self):
+        result = self.run_session(
+            lambda s: s.call_tool("scan_logs", {"path": "examples/ssh_bruteforce.log"})
+        )
+        self.assertFalse(result.is_error)
+        self.assertIn("SSH Brute Force", result.content[0].text)
+
+    def test_workspace_confinement_survives_the_mcp_layer(self):
+        result = self.run_session(lambda s: s.call_tool("read_file", {"path": "/etc/passwd"}))
+        self.assertTrue(result.is_error)
+        self.assertIn("outside the workspace", result.content[0].text)
+
+    def test_an_unknown_tool_is_an_error_not_a_crash(self):
+        result = self.run_session(lambda s: s.call_tool("no_such_tool", {}))
+        self.assertTrue(result.is_error)
 
 
 if __name__ == "__main__":

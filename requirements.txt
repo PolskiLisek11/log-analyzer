@@ -11,6 +11,17 @@
 #
 anthropic>=0.120.0
 
+# ── MCP server (jarvis/mcp_server.py) ─────────────────────────────────────────
+# Needed only to expose the analyzer to other agents — Claude Desktop, Claude
+# Code, Hermes Agent, anything that speaks MCP. The agent itself does not use it.
+#
+#     python -m jarvis.mcp_server --workspace /var/log
+#
+mcp>=2.0.0
+
+# Consuming remote MCP servers (Gmail, Calendar, …) needs nothing extra: the
+# API makes those connections server-side. See jarvis.config.example.json.
+
 # The test suite is stdlib unittest and runs without an API key:
 #
 #     python -m unittest discover -s tests -t .

@@ -54,6 +54,7 @@ class Engine:
         self.config = config
         self.on_warning = on_warning
         self._betas_enabled = config.server_side_fallback or config.compaction
+        self._mcp_enabled = bool(config.mcp_servers)
         try:
             self.client = anthropic.Anthropic(api_key=api_key) if api_key else anthropic.Anthropic()
         except Exception as exc:  # noqa: BLE001 — surfaced as a clean startup error
@@ -63,10 +64,12 @@ class Engine:
 
     def _betas(self) -> list[str]:
         betas: list[str] = []
-        if self.config.server_side_fallback:
+        if self._betas_enabled and self.config.server_side_fallback:
             betas.append("server-side-fallback-2026-07-01")
-        if self.config.compaction:
+        if self._betas_enabled and self.config.compaction:
             betas.append("compact-2026-01-12")
+        if self._mcp_enabled:
+            betas.append("mcp-client-2025-11-20")
         return betas
 
     def _kwargs(self, system, messages, tools) -> dict:
@@ -81,19 +84,31 @@ class Engine:
             },
             "output_config": {"effort": self.config.effort},
         }
+
+        tools = list(tools or [])
+        if self._mcp_enabled:
+            # Remote MCP servers contribute their tools through the API, which
+            # makes the connection server-side — nothing here executes them, and
+            # their results arrive as mcp_tool_result blocks rather than as
+            # tool_use requests for the harness to run. Sorted for the same
+            # reason local tools are: a stable prefix keeps the cache warm.
+            kwargs["mcp_servers"] = [dict(s) for s in self.config.mcp_servers]
+            tools += [
+                {"type": "mcp_toolset", "mcp_server_name": server["name"]}
+                for server in sorted(self.config.mcp_servers, key=lambda s: s["name"])
+            ]
         if tools:
             kwargs["tools"] = tools
 
-        if self._betas_enabled:
-            betas = self._betas()
-            if betas:
-                kwargs["betas"] = betas
-            if self.config.server_side_fallback:
-                # "default" lets the API pick the substitute by refusal category
-                # rather than pinning a model that will eventually be retired.
-                kwargs["fallbacks"] = "default"
-            if self.config.compaction:
-                kwargs["context_management"] = {"edits": [{"type": "compact_20260112"}]}
+        betas = self._betas()
+        if betas:
+            kwargs["betas"] = betas
+        if self._betas_enabled and self.config.server_side_fallback:
+            # "default" lets the API pick the substitute by refusal category
+            # rather than pinning a model that will eventually be retired.
+            kwargs["fallbacks"] = "default"
+        if self._betas_enabled and self.config.compaction:
+            kwargs["context_management"] = {"edits": [{"type": "compact_20260112"}]}
         return kwargs
 
     # ── Sending ───────────────────────────────────────────────────────────────
@@ -155,6 +170,20 @@ class Engine:
                     kwargs.pop(key, None)
                 if name == "betas":
                     self._betas_enabled = False
+                if name == "mcp_servers":
+                    # Dropping the servers is not enough: every server must be
+                    # referenced by exactly one toolset, so a leftover toolset
+                    # entry would fail validation on the retry.
+                    self._mcp_enabled = False
+                    kwargs["tools"] = [
+                        tool for tool in kwargs.get("tools", [])
+                        if tool.get("type") != "mcp_toolset"
+                    ] or None
+                    if not kwargs["tools"]:
+                        kwargs.pop("tools")
+                kwargs["betas"] = self._betas()
+                if not kwargs["betas"]:
+                    kwargs.pop("betas")
                 self.on_warning(f"{note} Reason: {getattr(exc, 'message', exc)}")
             except anthropic.APIError as exc:
                 raise EngineError(self._explain(exc)) from exc
@@ -170,6 +199,10 @@ class Engine:
         (
             "thinking", ("thinking",), ("thinking",),
             "This model rejected the thinking configuration — continuing without it.",
+        ),
+        (
+            "mcp_servers", ("mcp",), ("mcp_servers",),
+            "The remote MCP servers were rejected — continuing with local tools only.",
         ),
         (
             "betas", (), ("betas", "fallbacks", "context_management"),
