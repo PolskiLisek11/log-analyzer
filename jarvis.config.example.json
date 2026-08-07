@@ -1,0 +1,42 @@
+{
+  "_comment": [
+    "Copy to ~/.jarvis/config.json and edit. Every key is optional —",
+    "the defaults work without this file at all. Unknown keys are ignored,",
+    "so a config written by a newer version still boots."
+  ],
+
+  "model": "claude-opus-5",
+  "effort": "xhigh",
+  "approval_mode": "ask",
+
+  "_comment_mcp": [
+    "Remote MCP servers. The API connects to these server-side, so their",
+    "tools show up without any integration code here. Find servers at",
+    "https://github.com/tolkonepiu/best-of-mcp-servers — and remember that",
+    "an MCP server is third-party code with access to whatever it is given.",
+    "",
+    "Prefer an env var over a literal token: this file is easy to commit by",
+    "accident, and a token pasted here ends up in a backup somewhere."
+  ],
+  "mcp_servers": [
+    {
+      "name": "gmail",
+      "url": "https://example.com/gmail/sse",
+      "authorization_token": "${GMAIL_MCP_TOKEN}"
+    }
+  ],
+
+  "_comment_shell": [
+    "Extra binaries the shell tool may run. Interpreters are excluded by",
+    "default because allowing one is allowing arbitrary code — add python3",
+    "only when the agent runs inside a container."
+  ],
+  "shell_allow_extra": [],
+
+  "_comment_verify": [
+    "Fresh-context review passes after each answer. 0 (off) is right for",
+    "Opus 5, which verifies its own work. Set 1 when running a smaller model."
+  ],
+  "max_verify_rounds": 0,
+  "verify_model": "claude-sonnet-5"
+}

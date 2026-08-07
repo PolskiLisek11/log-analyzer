@@ -1,5 +1,27 @@
-# log-analyzer uses Python stdlib only — no external dependencies required.
+# analyzer.py uses the Python standard library only — no install needed.
 # Python 3.9+ recommended.
+#
+#     python analyzer.py --file examples/ssh_bruteforce.log
 
-# Optional: install for .env support (not required)
-# python-dotenv>=1.0.0
+# ── Jarvis agent (jarvis/) ────────────────────────────────────────────────────
+# Only the agent needs a dependency. Install it to run `python -m jarvis`:
+#
+#     pip install -r requirements.txt
+#     export ANTHROPIC_API_KEY=sk-ant-...
+#
+anthropic>=0.120.0
+
+# ── MCP server (jarvis/mcp_server.py) ─────────────────────────────────────────
+# Needed only to expose the analyzer to other agents — Claude Desktop, Claude
+# Code, Hermes Agent, anything that speaks MCP. The agent itself does not use it.
+#
+#     python -m jarvis.mcp_server --workspace /var/log
+#
+mcp>=2.0.0
+
+# Consuming remote MCP servers (Gmail, Calendar, …) needs nothing extra: the
+# API makes those connections server-side. See jarvis.config.example.json.
+
+# The test suite is stdlib unittest and runs without an API key:
+#
+#     python -m unittest discover -s tests -t .

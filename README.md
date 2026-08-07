@@ -137,16 +137,81 @@ python analyzer.py --batch examples/ --output report.json
 | `1` | Startup error (file not found, etc.) |
 | `2` | Threats found — useful for CI/SIEM pipelines |
 
+## Jarvis — the analyzer as an agent
+
+`analyzer.py` tells you *what* is in a log. Jarvis is a personal agent that can
+act on it: correlate an IP across files, remember what you decided about it last
+week, and draft the firewall rule. The analyzer becomes one of its tools.
+
+```bash
+pip install anthropic
+export ANTHROPIC_API_KEY=sk-ant-...
+
+python -m jarvis                                     # interactive session
+python -m jarvis -p "scan examples/ and summarise"   # one-shot
+python -m jarvis --workspace /var/log --approve readonly
+```
+
+It is assembled from five parts — a model, a loop, memory, tools and an
+interface — with a home at `~/.jarvis`:
+
+| Part | Where | What it does |
+|------|-------|--------------|
+| Engine | `jarvis/engine.py` | Talks to Claude. Streaming, adaptive thinking, effort. |
+| Harness | `jarvis/harness.py` | The loop: plan → act → feed results back → repeat. |
+| Memory | `jarvis/memory.py` | Markdown notes that survive between sessions. |
+| Tools | `jarvis/tools/` | Files, shell, memory, and `scan_logs` — this analyzer. |
+| Interface | `jarvis/cli.py`, `jarvis/voice.py` | Terminal REPL, optional speech. |
+
+State-changing actions ask before they run (`--approve auto` to skip, `readonly`
+to refuse). File tools cannot leave the workspace, and the shell tool runs one
+allowlisted command with no shell interpretation — so pipes and redirects do not
+work, and neither does command injection.
+
+### Works with other agents too
+
+The analyzer is also an MCP server, so it plugs into Claude Desktop, Claude Code,
+Hermes Agent — anything that speaks the protocol:
+
+```bash
+pip install mcp
+python -m jarvis.mcp_server --workspace /var/log
+```
+
+Read-only by default; `--allow-writes` opts in to the rest. And in the other
+direction, remote MCP servers (Gmail, Calendar, …) become Jarvis's tools with no
+integration code — the API connects to them server-side. See
+`jarvis.config.example.json`.
+
+Architecture and the reasoning behind each boundary: **[docs/JARVIS.md](docs/JARVIS.md)**.
+
+```bash
+python -m unittest discover -s tests -t .   # 97 tests, all offline
+```
+
+`analyzer.py` itself stays stdlib-only — `anthropic` is needed only for the agent.
+
 ## Project Structure
 
 ```
 log-analyzer/
 ├── analyzer.py          # main script — parser, detection engine, output
-├── requirements.txt     # stdlib only, no pip install needed
-└── examples/
-    ├── ssh_bruteforce.log       # simulated SSH brute force (3 IPs)
-    ├── web_scanning.log         # simulated dir scan + sqlmap + nikto
-    └── normal_traffic.log       # clean baseline traffic
+├── requirements.txt     # stdlib only for the analyzer; anthropic for the agent
+├── examples/
+│   ├── ssh_bruteforce.log       # simulated SSH brute force (3 IPs)
+│   ├── web_scanning.log         # simulated dir scan + sqlmap + nikto
+│   └── normal_traffic.log       # clean baseline traffic
+├── jarvis/              # the agent
+│   ├── engine.py                # the model (+ remote MCP servers as tools)
+│   ├── harness.py               # the agent loop
+│   ├── memory.py                # long-term notes
+│   ├── prompts.py               # system prompt
+│   ├── voice.py                 # speech output
+│   ├── cli.py                   # REPL + one-shot mode
+│   ├── mcp_server.py            # the analyzer, exposed to any MCP client
+│   └── tools/                   # files, shell, memory, plan, scan_logs
+├── docs/JARVIS.md       # agent architecture
+└── tests/test_jarvis.py # offline test suite
 ```
 
 ## Detection Thresholds
