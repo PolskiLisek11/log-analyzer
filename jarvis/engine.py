@@ -119,37 +119,79 @@ class Engine:
         return self._to_turn(message)
 
     def _send(self, kwargs: dict, *, on_text, on_thinking):
-        try:
-            return self._stream_once(kwargs, on_text, on_thinking)
-        except TypeError as exc:
-            # The SDK raises a bare TypeError when it cannot resolve any
-            # credential. It surfaces at request time rather than at client
-            # construction, so it cannot be caught earlier — and it is the very
-            # first thing a new user hits, so it gets a real message.
-            if "authentication" not in str(exc).lower():
-                raise
-            raise EngineError(
-                "No API credentials found. Either export ANTHROPIC_API_KEY, or run "
-                "`ant auth login` and leave it unset."
-            ) from exc
-        except anthropic.BadRequestError as exc:
-            if not self._betas_enabled:
-                raise EngineError(self._explain(exc)) from exc
-            # Most likely an unavailable beta on this account. Drop the optional
-            # features for the rest of the session and try the plain request.
-            self.on_warning(
-                "Optional API features (server-side fallback / compaction) were rejected — "
-                f"continuing without them. Reason: {getattr(exc, 'message', exc)}"
-            )
-            self._betas_enabled = False
-            for key in ("betas", "fallbacks", "context_management"):
-                kwargs.pop(key, None)
+        """Send, giving up one optional request feature per rejection.
+
+        `--model` takes any model id, and models differ in what they accept:
+        `effort: "max"` is rejected by Haiku 4.5, and thinking configuration is
+        not universal either. Rather than carry a capability table that goes
+        stale every release, the engine reads the rejection, drops the feature
+        the API named, warns once, and retries. Anything it cannot attribute to
+        an optional feature is a real error and is raised.
+        """
+        dropped: set[str] = set()
+
+        while True:
             try:
                 return self._stream_once(kwargs, on_text, on_thinking)
-            except anthropic.APIError as retry_exc:
-                raise EngineError(self._explain(retry_exc)) from retry_exc
-        except anthropic.APIError as exc:
-            raise EngineError(self._explain(exc)) from exc
+            except TypeError as exc:
+                # The SDK raises a bare TypeError when it cannot resolve any
+                # credential. It surfaces at request time rather than at client
+                # construction, so it cannot be caught earlier — and it is the
+                # very first thing a new user hits, so it gets a real message.
+                if "authentication" not in str(exc).lower():
+                    raise
+                raise EngineError(
+                    "No API credentials found. Either export ANTHROPIC_API_KEY, or run "
+                    "`ant auth login` and leave it unset."
+                ) from exc
+            except anthropic.BadRequestError as exc:
+                giving_up = self._next_degradation(exc, kwargs, dropped)
+                if giving_up is None:
+                    raise EngineError(self._explain(exc)) from exc
+
+                name, keys, note = giving_up
+                dropped.add(name)
+                for key in keys:
+                    kwargs.pop(key, None)
+                if name == "betas":
+                    self._betas_enabled = False
+                self.on_warning(f"{note} Reason: {getattr(exc, 'message', exc)}")
+            except anthropic.APIError as exc:
+                raise EngineError(self._explain(exc)) from exc
+
+    # Optional request features, and what to drop when the API rejects one.
+    # Ordered most specific first: a message naming "effort" should cost the
+    # effort setting, not the betas.
+    _DEGRADATIONS: tuple[tuple[str, tuple[str, ...], tuple[str, ...], str], ...] = (
+        (
+            "output_config", ("effort",), ("output_config",),
+            "This model rejected the effort setting — continuing without it.",
+        ),
+        (
+            "thinking", ("thinking",), ("thinking",),
+            "This model rejected the thinking configuration — continuing without it.",
+        ),
+        (
+            "betas", (), ("betas", "fallbacks", "context_management"),
+            "Optional API features (server-side fallback / compaction) were rejected — "
+            "continuing without them.",
+        ),
+    )
+
+    @classmethod
+    def _next_degradation(cls, exc: Exception, kwargs: dict, dropped: set[str]):
+        """Pick the feature to give up for this rejection, or None to raise."""
+        message = str(getattr(exc, "message", "") or exc).lower()
+
+        for name, keywords, keys, note in cls._DEGRADATIONS:
+            if name in dropped or not any(key in kwargs for key in keys):
+                continue
+            # The betas entry has no keywords: rejection wording for an
+            # unavailable beta varies, so it stays the last-resort attempt.
+            if keywords and not any(word in message for word in keywords):
+                continue
+            return name, keys, note
+        return None
 
     def _stream_once(self, kwargs: dict, on_text, on_thinking):
         resource = self.client.beta.messages if "betas" in kwargs else self.client.messages

@@ -508,6 +508,81 @@ class TestEngineShaping(unittest.TestCase):
 
 # ── Voice ─────────────────────────────────────────────────────────────────────
 
+class TestEngineDegradation(unittest.TestCase):
+    """Which optional feature the engine gives up for a given rejection.
+
+    `--model` accepts any model id and models differ in what they accept —
+    `effort: "max"` is rejected by Haiku 4.5, for one. The engine reads the
+    rejection rather than carrying a capability table that goes stale.
+    """
+
+    def full_kwargs(self) -> dict:
+        return {
+            "model": "claude-haiku-4-5",
+            "thinking": {"type": "adaptive"},
+            "output_config": {"effort": "max"},
+            "betas": ["compact-2026-01-12"],
+            "fallbacks": "default",
+            "context_management": {"edits": []},
+        }
+
+    @staticmethod
+    def error(message: str):
+        return types.SimpleNamespace(message=message)
+
+    def test_an_effort_rejection_drops_only_effort(self):
+        name, keys, _ = Engine._next_degradation(
+            self.error("effort: max is not supported by this model"), self.full_kwargs(), set()
+        )
+        self.assertEqual(name, "output_config")
+        self.assertEqual(keys, ("output_config",))
+
+    def test_a_thinking_rejection_drops_only_thinking(self):
+        name, keys, _ = Engine._next_degradation(
+            self.error("thinking is not supported"), self.full_kwargs(), set()
+        )
+        self.assertEqual(name, "thinking")
+        self.assertEqual(keys, ("thinking",))
+
+    def test_an_unattributable_rejection_falls_back_to_the_betas(self):
+        name, keys, _ = Engine._next_degradation(
+            self.error("something entirely unexpected"), self.full_kwargs(), set()
+        )
+        self.assertEqual(name, "betas")
+        self.assertIn("context_management", keys)
+
+    def test_a_feature_is_only_given_up_once(self):
+        kwargs = self.full_kwargs()
+        self.assertIsNone(
+            Engine._next_degradation(
+                self.error("effort rejected"), kwargs, {"output_config", "thinking", "betas"}
+            )
+        )
+
+    def test_nothing_left_to_drop_means_raise(self):
+        self.assertIsNone(
+            Engine._next_degradation(
+                self.error("messages: at least one message is required"),
+                {"model": "claude-opus-5", "messages": []},
+                set(),
+            )
+        )
+
+    def test_absent_features_are_not_offered_up(self):
+        # No effort in the request, so an unrelated failure must not claim it.
+        name, _, _ = Engine._next_degradation(
+            self.error("unexpected"),
+            {"model": "claude-opus-5", "betas": ["x"], "thinking": {"type": "adaptive"}},
+            set(),
+        )
+        self.assertEqual(name, "betas")
+
+    def test_degradations_cover_every_optional_kwarg(self):
+        optional = {"thinking", "output_config", "betas", "fallbacks", "context_management"}
+        covered = {key for _, _, keys, _ in Engine._DEGRADATIONS for key in keys}
+        self.assertEqual(covered, optional)
+
+
 class TestVoice(unittest.TestCase):
     def test_markdown_syntax_is_stripped(self):
         spoken = strip_markup("## Heading\n- **bold** and `code`\n[link](http://x)")

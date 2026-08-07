@@ -98,9 +98,33 @@ live here so the rest of the package never imports `anthropic`.
 - **Compaction** is on by default, so a long session summarises its own history
   server-side instead of dying at the context ceiling.
 
-The last two are betas. If the API rejects either, the engine turns both off,
-prints a warning and retries once — an unavailable beta should cost a warning,
-not the session.
+The last two are betas. If the API rejects either, the engine turns them off,
+prints a warning and retries — an unavailable beta should cost a warning, not
+the session.
+
+The same mechanism covers model differences. `--model` takes any model id, and
+models do not accept the same parameters: `effort: "max"` is rejected by Haiku
+4.5, for instance. Rather than carry a capability table that goes stale every
+release, the engine reads the rejection, drops the feature the API named,
+warns, and retries. A rejection it cannot attribute to an optional feature is a
+real error and is raised.
+
+### Choosing the engine model
+
+| Model | Price /MTok | Context | Use it for |
+|---|---|---|---|
+| `claude-opus-5` (default) | $5 / $25 | 1M | Agentic work. The default because this is a tool-loop agent, which is what it is best at. |
+| `claude-sonnet-5` | $3 / $15 | 1M | The daily driver. Near-Opus on agentic work for well under half the price. |
+| `claude-haiku-4-5` | cheapest | 200K | Scheduled scans and other routine passes. Caps at `--effort high`, and 64K output. |
+| `claude-fable-5` | $10 / $50 | 1M | The hardest reasoning. Rarely what an ops agent needs. |
+
+Effort is the other cost lever, and a bigger one than it looks: `--effort medium`
+on the default model is often a better trade than dropping to a smaller model at
+`xhigh`. Try that first.
+
+For anything unattended and recurring — a nightly log scan — `claude-haiku-4-5`
+with `--effort medium --verify 1` is the combination that makes sense: cheap
+model, review pass on to catch what it drops.
 
 ---
 
